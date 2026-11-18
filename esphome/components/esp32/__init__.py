@@ -3001,7 +3001,7 @@ async def _finalize_arduino_aware_flags():
 
 
 async def to_code(config):
-    framework_ver: cv.Version = CORE.data[KEY_CORE][KEY_FRAMEWORK_VERSION]
+    framework_ver = CORE.framework_version
     conf = config[CONF_FRAMEWORK]
 
     # Check if using ESP-IDF toolchain
@@ -3838,7 +3838,7 @@ def _write_sdkconfig():
     # version switch that happens to leave the option set unchanged still
     # bumps this file's content -- which is what has_outdated_files()
     # uses to decide whether to reconfigure.
-    framework_version = CORE.data[KEY_CORE][KEY_FRAMEWORK_VERSION]
+    framework_version = CORE.framework_version
     contents = (
         f"# ESPHOME_IDF_VERSION={framework_version}\n"
         + "\n".join(
@@ -3991,7 +3991,7 @@ def _write_idf_component_yml():
         if CORE.using_toolchain_esp_idf:
             add_idf_component(
                 name=ARDUINO_ESP32_COMPONENT_NAME,
-                ref=str(CORE.data[KEY_CORE][KEY_FRAMEWORK_VERSION]),
+                ref=str(CORE.framework_version),
             )
 
     for component in converted:
