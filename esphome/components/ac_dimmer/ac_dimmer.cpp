@@ -14,6 +14,10 @@
 #include "hw_timer_esp_idf.h"
 #endif
 
+#ifdef USE_AC_DIMMER_BK72XX_TIMER
+#include "hw_timer_bk72xx.h"
+#endif
+
 namespace esphome::ac_dimmer {
 
 ESPHOME_LOG_TAG(TAG, "ac_dimmer");
@@ -60,8 +64,19 @@ static void esp8266_timer_in(uint32_t us);
 #ifdef USE_ESP32
 /// Timer frequency in Hz (1 MHz = 1µs resolution)
 static constexpr uint32_t TIMER_FREQUENCY_HZ = 1000000;
+#endif
+
+#if defined(USE_ESP32) || defined(USE_AC_DIMMER_BK72XX_TIMER)
 /// Timer interrupt interval in microseconds
-static constexpr uint64_t TIMER_INTERVAL_US = 50;
+static constexpr uint32_t TIMER_INTERVAL_US = 50;
+#endif
+
+#ifdef USE_AC_DIMMER_BK72XX_TIMER
+/// Timer work re-check interval while no dimmer is locked
+static constexpr int32_t BK72XX_IDLE_WAIT_US = 1000;
+/// µs until the dimmers need the timer work again; the ticks in between only count down. A zero-cross edge sets it
+/// to 0.
+static volatile int32_t bk72xx_wait_us = 0;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 #endif
 
 /// Function called from timer interrupt
@@ -256,7 +271,7 @@ void IRAM_ATTR HOT AcDimmerDataStore::track_edge(uint32_t now, const AcDimmerDat
 /// GPIO interrupt routine, called when ZC pin triggers
 void IRAM_ATTR HOT AcDimmerDataStore::gpio_intr([[maybe_unused]] uint32_t now,
                                                 [[maybe_unused]] const AcDimmerDataStore *noise_from) {
-#if defined(USE_ESP8266) || defined(USE_ESP32)
+#if defined(USE_ESP8266) || defined(USE_ESP32) || defined(USE_AC_DIMMER_BK72XX_TIMER)
   this->zero_cross_edge(now, noise_from);
 #else
   // No dimmer timer on this platform: only fully on and fully off work, switched at the crossing
@@ -314,7 +329,13 @@ void IRAM_ATTR HOT AcDimmerDataStore::s_gpio_intr(AcDimmerDataStore *store) {
   // However, the user expects that multiple dimmers sharing the same ZC pin will work.
   // We solve this in a bit of a hacky way: On each pin interrupt, we check all dimmers
   // if any of them are using the same ZC pin, and also trigger the interrupt for *them*.
+#ifdef USE_AC_DIMMER_BK72XX_TIMER
+  uint32_t now;
+  if (!bk72xx_clock_us(&now))
+    return;  // the clock could not be read: the tracker treats the edge as missed
+#else
   const uint32_t now = micros();
+#endif
   // The detector also picks up the other dimmers' gates: noise after any of them is no crossing
   const AcDimmerDataStore *noise_from = nullptr;
   for (auto *dimmer : all_dimmers) {
@@ -334,9 +355,13 @@ void IRAM_ATTR HOT AcDimmerDataStore::s_gpio_intr(AcDimmerDataStore *store) {
   // The edge can move the next event earlier: run the timer code right away
   esp8266_timer_in(2);
 #endif
+#ifdef USE_AC_DIMMER_BK72XX_TIMER
+  // The edge can move the next event earlier: do the timer work on the next tick
+  bk72xx_wait_us = 0;
+#endif
 }
 
-#if defined(USE_ESP8266) || defined(USE_ESP32)
+#if defined(USE_ESP8266) || defined(USE_ESP32) || defined(USE_AC_DIMMER_BK72XX_TIMER)
 /// Runs the timer work of every dimmer; returns the µs until the earliest next event, 0 for none
 static uint32_t IRAM_ATTR HOT run_timers(uint32_t now) {
   uint32_t next = 0;
@@ -380,6 +405,27 @@ static void IRAM_ATTR HOT esp8266_timer_isr() {
 static HWTimer *dimmer_timer = nullptr;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
 void IRAM_ATTR HOT AcDimmerDataStore::s_timer_intr() { run_timers(micros()); }
+#endif
+
+#ifdef USE_AC_DIMMER_BK72XX_TIMER
+// BK72xx: BKTIMER1 every 50 µs, doing the timer work only when it is due; reading the clock costs a timer register
+// latch. The GPIO and timer interrupts are both IRQs, which do not nest (Wi-Fi uses the FIQ), so the timing needs no
+// lock between them.
+static void bk72xx_timer_isr(uint8_t /*channel*/) {
+  // Read the clock on every tick, so that it sees every wrap of its counter
+  uint32_t now;
+  const bool have_now = bk72xx_clock_us(&now);
+  const int32_t wait = bk72xx_wait_us - static_cast<int32_t>(TIMER_INTERVAL_US);
+  if (wait > 0 || !have_now) {
+    bk72xx_wait_us = wait;
+    return;
+  }
+  const uint32_t next = run_timers(now);
+  // Fire on the tick at or just after the event: up to 50 µs late, as with the ESP32's fixed tick
+  bk72xx_wait_us = next != 0 ? static_cast<int32_t>(next) : BK72XX_IDLE_WAIT_US;
+}
+
+static bool bk72xx_timer_started = false;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 #endif
 
 void AcDimmer::setup() {
@@ -428,6 +474,15 @@ void AcDimmer::setup() {
     // are not callable from ISR (placed in flash storage).
     // Here we just use an interrupt firing every 50 µs.
     timer_alarm(dimmer_timer, TIMER_INTERVAL_US, true, 0);
+  }
+#endif
+#ifdef USE_AC_DIMMER_BK72XX_TIMER
+  if (!bk72xx_timer_started) {
+    if (!bk72xx_timer_begin(TIMER_INTERVAL_US, &bk72xx_timer_isr)) {
+      this->mark_failed(LOG_STR("Timer init failed"));
+      return;
+    }
+    bk72xx_timer_started = true;
   }
 #endif
 }
