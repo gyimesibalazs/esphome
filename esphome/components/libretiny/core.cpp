@@ -14,6 +14,9 @@ extern "C" Serial_t *serial_handles[SER_PORT_NUM];
 
 namespace esphome::libretiny {
 
+// Redundant with the LibreTiny release that opens LN882H Serial ports on their own SDK handle (planned together
+// with LN882H PWM, see LN882H_PWM_VERSION in __init__.py): begin() then replaces the handle put here (it leaks), and
+// with USE_UART_TX_BREAK `storage` can keep a pointer to a handle that Serial.end() frees. Skip it from that release.
 void ensure_serial_handle(uint8_t port) {
   if (port >= SER_PORT_NUM)
     return;

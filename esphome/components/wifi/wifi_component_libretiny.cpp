@@ -33,7 +33,8 @@ extern "C" {
 #include <WiFiPrivate.h>
 #undef DATA  // clashes with setup_priority::DATA
 // LibreTiny 1.13's LN882H reconnect() gives the SDK a NULL bssid; pass on the requested one. Remove once it passes
-// info.bssid. Safe without a BSSID: begin() frees sta.bssid (resetNetworkInfo), so it stays NULL.
+// info.bssid (planned for the release with LN882H PWM, see LN882H_PWM_VERSION). Safe without a BSSID: begin() frees
+// sta.bssid (resetNetworkInfo), so it stays NULL; harmless but redundant with that release.
 // NOLINTBEGIN(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp,readability-identifier-naming)
 // Names are mandated by the --wrap linker mechanism.
 extern "C" int __real_wifi_sta_connect(wifi_sta_connect_t *connect, wifi_scan_cfg_t *scan_cfg);
@@ -848,7 +849,8 @@ bool WiFiComponent::wifi_start_ap_(const WiFiAP &ap) {
 #ifdef USE_LN882X
   // LibreTiny's LN882H softAP() points ap.bssid at a static array and frees it
   // on the next call, tripping FreeRTOS's configASSERT until the watchdog
-  // resets the chip. Clear it so that a second AP start frees nothing.
+  // resets the chip. Clear it so that a second AP start frees nothing. Redundant with the LibreTiny release that keeps
+  // the AP BSSID on the heap (planned with LN882H PWM, see LN882H_PWM_VERSION); there it leaks 6 bytes per AP start.
   static_cast<WiFiData *>(WiFi.data)->ap.bssid = nullptr;
 #endif
 
