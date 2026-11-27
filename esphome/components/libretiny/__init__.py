@@ -244,6 +244,18 @@ def can_choose_uart_pins() -> bool:
     return CORE.framework_version >= cv.Version(1, 12, 0)
 
 
+# The first LibreTiny release with analogWrite() on LN882H. Assumed (not yet released):
+# set it to the real version once that release exists; nothing else needs to change.
+LN882H_PWM_VERSION = cv.Version(1, 15, 0)
+
+
+def has_pwm() -> bool:
+    """True when the family's Arduino core has analogWrite(): LN882H only from LN882H_PWM_VERSION."""
+    if get_libretiny_family() == FAMILY_LN882H:
+        return CORE.framework_version >= LN882H_PWM_VERSION
+    return True
+
+
 def only_on_family(*, supported=None, unsupported=None):
     """Config validator for features only available on some LibreTiny families."""
     if supported is not None and not isinstance(supported, list):

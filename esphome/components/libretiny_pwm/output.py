@@ -1,7 +1,6 @@
 from esphome import automation, pins
 import esphome.codegen as cg
 from esphome.components import libretiny, output
-from esphome.components.libretiny.const import FAMILY_LN882H
 import esphome.config_validation as cv
 from esphome.const import CONF_FREQUENCY, CONF_ID, CONF_PIN
 from esphome.types import ConfigType
@@ -13,8 +12,18 @@ LibreTinyPWM = libretinypwm_ns.class_("LibreTinyPWM", output.FloatOutput, cg.Com
 
 validate_frequency = cv.All(cv.frequency, cv.float_range(min=0, min_included=False))
 
+
+def _validate_pwm(config: ConfigType) -> ConfigType:
+    if not libretiny.has_pwm():
+        raise cv.Invalid(
+            f"PWM on {libretiny.get_libretiny_family()} needs LibreTiny "
+            f"{libretiny.LN882H_PWM_VERSION} or later"
+        )
+    return config
+
+
 CONFIG_SCHEMA = cv.All(
-    libretiny.only_on_family(unsupported=FAMILY_LN882H),
+    _validate_pwm,
     output.FLOAT_OUTPUT_SCHEMA.extend(
         {
             cv.Required(CONF_ID): cv.declare_id(LibreTinyPWM),
